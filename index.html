@@ -1,0 +1,433 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Finding CVEs with Fuzzing in Any Language</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reset.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/black.min.css">
+
+  <style>
+    /* Cyberpunk styling */
+    body { background: #000000; }
+    .reveal section h1, 
+    .reveal section h2, 
+    .reveal section h3 { color: #00ffff !important; }
+    .reveal p, .reveal li { color: #a8feff; font-size: 1.25em; }
+    .reveal pre code { color: #00ffea; font-size: 0.85em; white-space: pre-wrap; }
+
+    /* global diagram auto-fit */
+    .diagram {
+      font-size: 0.65em !important;
+      line-height: 1.1em;
+      color: #00ffff;
+      font-family: monospace;
+      white-space: pre;
+    }
+  </style>
+</head>
+
+<body>
+<div class="reveal"><div class="slides">
+
+<!-- ================= SLIDE 1 ================= -->
+<section>
+<h1>Finding CVEs with Fuzzing in Any Language</h1>
+<h3>Goktug Serez — 2025</h3>
+</section>
+
+<!-- ================= SLIDE 2 ================= -->
+<section>
+<h2>Why Multi-Language Fuzzing?</h2>
+<ul>
+<li>Modern infra = Python, Go, Rust, Java</li>
+<li>Memory safety != logic safety</li>
+<li>Parsers fail across all languages</li>
+<li>Fuzzing explores unexpected states</li>
+<li>CVEs emerge from logical inconsistencies</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 3 ================= -->
+<section>
+<h2>Coverage-Guided Fuzzing (CGF)</h2>
+<div class="diagram">
+┌──────────┐
+│ Mutate   │
+└─────┬────┘
+ ↓
+┌────────────┐   new coverage?    ┌──────────┐
+│  Execute   │ -----------------> │ Save     │
+└─────┬──────┘                    │  Seed    │
+      ↓                           └─────┬────┘
+                                   ↓
+    Crash?                         Repeat loop
+
+</div>
+</section>
+
+<!-- ================= SLIDE 4 ================= -->
+<section><h2>C/C++ Vulnerabilities</h2>
+<ul><li>Buffer overflow</li><li>Use-after-free</li><li>Integer wrap/truncation</li><li>Pointer misalignment</li></ul>
+</section>
+
+<!-- ================= SLIDE 5 ================= -->
+<section>
+<h2>Real C/C++ CVEs</h2>
+<ul>
+<li>CVE-2023-4863 — libwebp overflow</li>
+<li>CVE-2022-3602 — OpenSSL overflow</li>
+<li>CVE-2022-37434 — zlib crash</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 6 ================= -->
+<section>
+<h2>C/C++ Vulnerable Function</h2>
+<pre><code>
+int parse(const uint8_t* d, size_t s){
+    if (s < 4) return 0;
+    uint32_t len = *(uint32_t*)d; // unsafe
+    char buf[64];
+    memcpy(buf, d+4, len);        // overflow
+    return buf[0];
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 7 ================= -->
+<section>
+<h2>C/C++ Fuzz Harness (libFuzzer)</h2>
+<pre><code>
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* d, size_t s) {
+    parse(d, s);
+    return 0;
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 8 ================= -->
+<section>
+<h2>Run Command (C/C++)</h2>
+<pre><code>
+clang++ -fsanitize=address,fuzzer parse.cc -o fuzz
+./fuzz
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 9 ================= -->
+<section><h2>Safe Languages Still Break</h2></section>
+
+<!-- ================= SLIDE 10 ================= -->
+<section>
+<h2>Python Attack Surface</h2>
+<ul>
+<li>yaml.load unsafe constructors</li>
+<li>Regex catastrophic backtracking</li>
+<li>urllib.parse domain confusion</li>
+<li>Exception-based DoS chains</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 11 ================= -->
+<section>
+<h2>Python Vulnerable Code</h2>
+<pre><code>
+import yaml
+def load_conf(data):
+    return yaml.load(data, Loader=yaml.FullLoader)
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 12 ================= -->
+<section>
+<h2>Atheris Harness</h2>
+<pre><code>
+import atheris, vuln, sys
+
+def TestOneInput(d):
+    try:
+        vuln.load_conf(d.decode("utf-8","ignore"))
+    except Exception:
+        pass
+
+atheris.Setup(sys.argv, TestOneInput)
+atheris.Fuzz()
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 13 ================= -->
+<section>
+<h2>Run Command (Python)</h2>
+<pre><code>
+pip install atheris
+python3 fuzz.py
+</code></pre>
+<p>(Atheris requires Python 3.8–3.10)</p>
+</section>
+
+<!-- ================= SLIDE 14 ================= -->
+<section>
+<h2>Python CVEs</h2>
+<ul>
+<li>CVE-2020-14343 — PyYAML unsafe load → RCE</li>
+<li>CVE-2023-24329 — urllib.parse confusion</li>
+<li>CVE-2022-40897 — python-jose JWT bypass</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 15 ================= -->
+<section><h2>Go: Why It Crashes</h2><p>Panics == crashes.</p></section>
+
+<!-- ================= SLIDE 16 ================= -->
+<section>
+<h2>Go Vulnerable Code</h2>
+<pre><code>
+func Parse(b []byte) int {
+    var d map[string]interface{}
+    yaml.Unmarshal(b, &d)
+    return 100 / int(d["replicas"].(float64))
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 17 ================= -->
+<section>
+<h2>Go Fuzz Harness</h2>
+<pre><code>
+func FuzzParse(f *testing.F) {
+    f.Add([]byte("replicas: 1"))
+    f.Fuzz(func(t *testing.T, data []byte) {
+        Parse(data)
+    })
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 18 ================= -->
+<section>
+<h2>Run Command (Go)</h2>
+<pre><code>
+go test -run=^$ -fuzz=FuzzParse -fuzztime=30s
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 19 ================= -->
+<section>
+<h2>Go CVEs</h2>
+<ul>
+<li>CVE-2019-11253 — Kubernetes YAML DoS</li>
+<li>CVE-2024-26147 — Helm panic</li>
+<li>CVE-2022-29526 — archive/zip panic</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 20 ================= -->
+<section><h2>Rust: Logic Panics</h2></section>
+
+<!-- ================= SLIDE 21 ================= -->
+<section>
+<h2>Rust Vulnerable Code</h2>
+<pre><code>
+pub fn parse_token(t: &str) -> &str {
+    let parts: Vec<&str> = t.split('.').collect();
+    parts[2] // panic if <3 parts
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 22 ================= -->
+<section>
+<h2>Rust cargo-fuzz Target</h2>
+<pre><code>
+#![no_main]
+use libfuzzer_sys::fuzz_target;
+
+fuzz_target!(|data: &str| {
+    let _ = mycrate::parse_token(data);
+});
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 23 ================= -->
+<section>
+<h2>Run Command (Rust)</h2>
+<pre><code>
+cargo install cargo-fuzz
+cargo fuzz init
+cargo fuzz run parse_token
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 24 ================= -->
+<section>
+<h2>Rust CVEs</h2>
+<ul>
+<li>CVE-2023-34411 — xml-rs recursion DoS</li>
+<li>CVE-2020-35900 — regex catastrophic backtracking</li>
+<li>CVE-2022-21658 — flate2 DoS</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 25 ================= -->
+<section><h2>Java: Serialization & Polymorphism</h2></section>
+
+<!-- ================= SLIDE 26 ================= -->
+<section>
+<h2>Java Vulnerable Code</h2>
+<pre><code>
+public class Vuln {
+    public static Object load(String data) throws Exception {
+        var m = new ObjectMapper();
+        return m.readValue(data, Object.class);
+    }
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 27 ================= -->
+<section>
+<h2>Jazzer Harness</h2>
+<pre><code>
+public class FuzzVuln {
+    public static void fuzzerTestOneInput(FuzzedDataProvider d) {
+        try { Vuln.load(d.consumeRemainingAsString()); }
+        catch (Exception ignored) {}
+    }
+}
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 28 ================= -->
+<section>
+<h2>Run Command (Java)</h2>
+<pre><code>
+jazzer --cp=./ --target_class=FuzzVuln
+</code></pre>
+</section>
+
+<!-- ================= SLIDE 29 ================= -->
+<section>
+<h2>Java CVEs</h2>
+<ul>
+<li>CVE-2021-21346 — Fastjson RCE</li>
+<li>CVE-2020-26945 — Jackson polymorphic deserialization</li>
+<li>Many XXE vulnerabilities</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 30 ================= -->
+<section>
+<h2>Cross-Language Insights</h2>
+<ul>
+<li>All languages break differently</li>
+<li>Parsers are the weakest link</li>
+<li>Memory-safe ≠ logic-safe</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 31 ================= -->
+<section>
+<h2>High-Value Targets</h2>
+<ul>
+<li>Kubernetes API (Go)</li>
+<li>AWS CLI (Python)</li>
+<li>Vault/Terraform (Go)</li>
+<li>xml-rs / regex / flate2 (Rust)</li>
+<li>Jackson / Fastjson (Java)</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 32 ================= -->
+<section>
+<h2>Researcher Toolkit</h2>
+<ul>
+<li>AFL++</li>
+<li>libFuzzer</li>
+<li>Atheris</li>
+<li>go test -fuzz</li>
+<li>cargo-fuzz</li>
+<li>Jazzer</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 33 ================= -->
+<section>
+<h2>Fast Wins</h2>
+<ul>
+<li>panic chains</li>
+<li>exceptions</li>
+<li>division-by-zero</li>
+<li>type confusion</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 34 ================= -->
+<section>
+<h2>Deep Wins</h2>
+<ul>
+<li>recursive parsing</li>
+<li>JSON/YAML polymorphism</li>
+<li>nested serialization</li>
+<li>state machine mismatches</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 35 ================= -->
+<section>
+<h2>Universal Fuzzing Workflow</h2>
+<ul>
+<li>Pick entrypoint</li>
+<li>Prepare seeds</li>
+<li>Run CGF engine</li>
+<li>Triaging crashes</li>
+<li>Minimize reproducer</li>
+<li>Publish CVE</li>
+</ul>
+</section>
+
+<!-- ================= SLIDE 36 ================= -->
+<section><h2>Fuzz Everything</h2></section>
+
+<!-- ================= SLIDE 37 ================= -->
+<section><h2>Memory-Safe ≠ Bug-Safe</h2></section>
+
+<!-- ================= SLIDE 38 ================= -->
+<section><h2>Unexpected Input =&gt; CVE</h2></section>
+
+<!-- ================= SLIDE 39 ================= -->
+<section><h1>Thank You</h1><h3>g0ku704.github.io</h3>goktugserez[at]gmail.com</section>
+
+<!-- ================= SLIDE 40 ================= -->
+<section>
+<h2>References</h2>
+<ul>
+<li><a href="https://google.github.io/oss-fuzz/">Google OSS-Fuzz Documentation</a></li>
+<li><a href="https://llvm.org/docs/LibFuzzer.html">libFuzzer Reference Guide (LLVM)</a></li>
+<li><a href="https://github.com/AFLplusplus/AFLplusplus">AFL++ GitHub Repository</a></li>
+<li><a href="https://go.dev/doc/fuzz/">Go Fuzzing Guide (Go Official Docs)</a></li>
+<li><a href="https://github.com/google/atheris">Atheris Python Fuzzer (GitHub)</a></li>
+<li><a href="https://github.com/CodeIntelligenceTesting/jazzer">Jazzer Java Fuzzer (GitHub)</a></li>
+<li><a href="https://github.com/rust-fuzz/cargo-fuzz">cargo-fuzz for Rust (GitHub)</a></li>
+<li><a href="https://cve.mitre.org/">MITRE CVE Database</a></li>
+<li><a href="https://github.com/google/fuzzing">Google Fuzzing Tutorials</a></li>
+<li><a href="https://www.blackhat.com/html/archives.html">BlackHat Archives (Fuzzing Research)</a></li>
+</ul>
+</section>
+
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.js"></script>
+<script>
+Reveal.initialize({
+  controls: true,
+  progress: true,
+  history: true,
+  center: true,
+  slideNumber: true,
+  transition: 'fade'
+});
+</script>
+
+</body>
+</html>
